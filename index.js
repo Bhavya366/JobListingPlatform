@@ -9,6 +9,29 @@ const app=express()
 app.use(bodyParser.urlencoded({extended:false}))
 app.use(express.static('./public'))
 
+// Route: /health-api
+app.get('/health-api', (req, res) => {
+    const currentTime = new Date().toLocaleTimeString();
+    const response = {
+      time: currentTime,
+      app: "express-server",
+      status: "active"
+    };
+    res.json(response);
+});
+
+const Job = mongoose.model('Job',{
+    companyName:String,
+    logoUrl:String,
+    jobPosition:String,
+    monthlySalary:Number,
+    jobType:Object,
+    remoteOff:Object,
+    location:String,
+    jobDescription:String,
+    aboutCompany:String,
+    skills:Object,
+})
 
 app.listen(process.env.PORT,()=>{
     mongoose.connect(process.env.MONGODB_URL,{
