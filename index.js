@@ -13,6 +13,22 @@ app.use(bodyParser.urlencoded({ extended: false }))
 app.use(express.static('./public'))
 app.use(express.json())
 app.use(cookieParser())
+//Error handling middleware
+app.use((req,res,next)=>{
+    const err=new Error("Something went wrong! Please try after some time.")
+    err.status = 404
+    next(err)
+});
+//Error handler
+app.use((err,req,res,next)=>{
+    res.status(err.status || 500)
+    res.send({
+        error:{
+            status:err.status|| 500,
+            message:err.message
+        }
+    })
+})
 
 const Job = mongoose.model('Job', {
     companyName: String,
