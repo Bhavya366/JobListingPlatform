@@ -8,47 +8,25 @@ const cookieParser = require('cookie-parser')
 dotenv.config()
 const app = express()
 
+//importing models
+const User = require('./models/user')
+const Job = require('./models/job')
+
 // Middlewares
 app.use(bodyParser.urlencoded({ extended: false }))
 app.use(express.static('./public'))
 app.use(express.json())
 app.use(cookieParser())
-//Error handling middleware
-app.use((req,res,next)=>{
-    const err=new Error("Something went wrong! Please try after some time.")
-    err.status = 404
-    next(err)
-});
-//Error handler
-app.use((err,req,res,next)=>{
-    res.status(err.status || 500)
-    res.send({
-        error:{
-            status:err.status|| 500,
-            message:err.message
-        }
-    })
-})
 
-const Job = mongoose.model('Job', {
-    companyName: String,
-    logoUrl: String,
-    jobPosition: String,
-    monthlySalary: Number,
-    jobType: Object,
-    remoteOff: Object,
-    location: String,
-    jobDescription: String,
-    aboutCompany: String,
-    skills: Object
-})
-const User = mongoose.model('User', {
-    name: String,
-    email: String,
-    mobile: Number,
-    password: String
-})
-
+const isAuthenticated = (req,res,next)=>{
+    try{
+        const decoded = jwt.verify(req.headers.token,process.env.JWT_SECRET_KEY)
+    }
+    catch(error){
+        res.send({status:'fail',message:'please login first'})
+    }
+    next()
+}
 // Route: /health-api
 app.get('/health-api', (req, res) => {
     const currentTime = new Date().toLocaleTimeString();
@@ -87,7 +65,7 @@ app.post('/register', async (req, res) => {
             //generate a token for user and send it
             const token = jwt.sign(
                 { id: user._id, email: email },
-                'shhhh',//process.env.jwtsecret
+                process.env.JWT_SECRET_KEY,//process.env.jwtsecret
                 {
                     expiresIn: "2h"
                 }
@@ -121,10 +99,8 @@ app.post('/login', async (req, res) => {
         if (user && (await bcrypt.compare(password, user.password))) {
             const token = jwt.sign(
                 { id: user._id },
-                'shhhh',//process.env.jwtsecret
-                {
-                    expiresIn: "2h"
-                }
+                process.env.JWT_SECRET_KEY,//process.env.jwtsecret
+                {expiresIn: "2h"}
             );
             user.token = token
             user.password = undefined
@@ -147,9 +123,152 @@ app.post('/login', async (req, res) => {
         console.log("Error Occured", error)
     }
 })
+
+//Route: Protected route /post-job
+app.post('/post-job',isAuthenticated,async(req,res)=>{
+    try {
+        const {
+          companyName,logoUrl,
+          jobPosition,monthlySalary,
+          jobType,remoteOff,
+          location,jobDescription,
+          aboutCompany,skillsRequired,
+        } = req.body;
+    
+        // Validate the fields
+        if (
+          !companyName || !logoUrl || !jobPosition ||
+          !monthlySalary || !jobType || !remoteOff ||
+          !location || !jobDescription || !aboutCompany || !skillsRequired) {
+          return res.status(400).json({ message: `Missing required fields${skillsRequired }` });
+        }
+    
+        // Create a new job post
+        const job = await Job.create({
+            companyName,logoUrl,
+            jobPosition,monthlySalary,
+            jobType,remoteOff,
+            location,jobDescription,
+            aboutCompany,skillsRequired,
+        })
+    
+        return res.status(201).json({ message: 'Job post created successfully',job:job });
+      } catch (error) {
+        console.error('Error creating job post:', error);
+        return res.status(500).json({ message: 'Internal server error' });
+      }
+})
+
+//Route:/get-job-by-id
+app.get('/:id',async (req, res) => {
+    try {
+        const { id } = req.params;
+        const job = await Job.findOne({ _id: id })
+        if (job) {
+            return res.status(200).json({
+                message: "Job fetched successfully!",
+                data: job,
+            })
+        } else {
+            return res.status(401).json({
+                message: 'Not found!',
+            })
+        }
+    } catch (error) {
+        return res.status(401).json({
+            message: 'Something went wrong!',
+            error: error,
+        })
+    }
+})
+
+//Route:/get-job-by-skills -filtering skills
+app.get('/',async (req, res) => {
+    try {
+        let skills = req.query.skillsRequired;
+        let search = req.query.search || "";
+        // console.log(skills, search,typeof(skills))
+        const jobs = await Job.find({ jobPosition: { $regex: search, $options: "i" } })
+            .where('skillsRequired')
+            .in(skills)
+            .sort({ createdAt: -1 })
+        console.log(jobs)
+        if (jobs) {
+            return res.status(200).json({
+                message: 'Jobs fetched successfully!',
+                data: jobs,
+            })
+        } else if (jobs.length === 0) {
+            return res.status(404).json({
+                message: 'Not found!'
+            })
+        }
+    } catch (error) {
+        console.log(error)
+        return res.status(400).json({
+            message: 'Something went wrong!',
+            error: error
+        })
+    }
+})
+
+//Route:/Edit-job route to edit a job
+app.put('/update-job',isAuthenticated,async (req, res) => {
+    try {
+        const { id, companyName, logoUrl, jobPosition, monthlySalary, jobType, remoteOff, location, jobDescription, aboutCompany, skillsRequired } = req.body;
+
+        const job = await Job.findOne({ _id: id });
+        if (job) {
+            job.companyName = companyName || job.companyName;
+            job.logoUrl = logoUrl || job.logoUrl;
+            job.jobPosition = jobPosition || job.jobPosition;
+            job.monthlySalary = monthlySalary || job.monthlySalary;
+            job.jobType = jobType || job.jobType;
+            job.remoteOff = remoteOff || job.remoteOff;
+            job.location = location || job.location;
+            job.jobDescription = jobDescription || job.jobDescription;
+            job.aboutCompany = aboutCompany || job.aboutCompany;
+            job.skillsRequired = skillsRequired || job.skillsRequired;
+            const updatedJob = await job.save();
+            return res.status(200).json({
+            message: 'Job updated successfully',
+            data: updatedJob,
+            error: null
+        })
+        } else {
+            return res.status(401).json({
+                message: 'Not found!',
+            })
+        }
+    } catch (error) {
+        console.log(error)
+        return res.status(500).json({
+            message: 'Internal server error',
+            error: error
+        })
+    }
+})
+
 app.listen(process.env.PORT, () => {
     mongoose.connect(process.env.MONGODB_URL, {
         useNewUrlParser: true,
         useUnifiedTopology: true,
     }).then(() => console.log(`Server running on port ${process.env.PORT}`)).catch((err) => console.log("Error occured", err))
 })
+
+//Error handling middlewares
+app.all('*',(req,res,next)=>{  
+    const err = new Error('Something went wrong! Please try after some time.');
+    err.status = 'fail';
+    err.statusCode = 404;
+    next(err);
+})
+app.use((error,req,res,next)=>{
+    error.statusCode = error.statusCode || 500;
+    error.status = error.status || 500;
+    res.status(error.statusCode).json({
+        status:error.statusCode,
+        message:error.message
+    })
+})
+
